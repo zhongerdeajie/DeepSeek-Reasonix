@@ -40,6 +40,15 @@ var uploadSignals = map[string]bool{
 	// hold was contended or not, how long it waited, and how much of it was
 	// spent holding and not writing.
 	"lease_hold": true, "lease_wait": true, "lease_idle": true,
+	// Friction-audit counters (#12554): the paths the audit could not quantify
+	// because nothing counted them. Counts and closed enums only, no content.
+	"approval_requested": true,
+	"ask_requested":      true,
+	"steer_delivered":    true,
+	"compaction_done":    true,
+	"compaction_aborted": true,
+	"inbox_changed":      true,
+	"turn_phase":         true,
 }
 
 // queuedSurface reads a payload's surface. A queue predating the field can only

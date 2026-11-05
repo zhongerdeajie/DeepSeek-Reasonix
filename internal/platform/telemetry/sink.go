@@ -207,6 +207,27 @@ func (s *sink) observe(e event.Event) {
 		s.reporter.append(leaseCounts(e.WorkspaceLease))
 	case event.CompactionStarted:
 		add(s.counts, "compaction", enumBucket(e.Compaction.Trigger, "auto", "manual"), 1)
+	case event.CompactionDone:
+		// The friction audit needs to know a fold actually finished. An aborted
+		// pass leaves Summary empty, which is the shape of the session that
+		// pinned at 560% with auto-compaction no longer running at all.
+		add(s.counts, "compaction_done", enumBucket(e.Compaction.Trigger, "auto", "manual"), 1)
+		if e.Compaction.Summary == "" {
+			add(s.counts, "compaction_aborted", "count", 1)
+		}
+	case event.ApprovalRequest:
+		// The audit names "approval counts and outcomes" as unknown. Counting
+		// the request is the half the event stream carries; the outcome arrives
+		// as ToolDispatch/ToolResult and is not attributable from here.
+		add(s.counts, "approval_requested", "count", 1)
+	case event.AskRequest:
+		add(s.counts, "ask_requested", "count", 1)
+	case event.Steer:
+		add(s.counts, "steer_delivered", "count", 1)
+	case event.InboxChanged:
+		add(s.counts, "inbox_changed", "count", 1)
+	case event.TurnPhase:
+		add(s.counts, "turn_phase", enumBucket(e.Text, "working", "checking", "verifying", "reviewing"), 1)
 	case event.TurnDone:
 		if !s.hasText && e.Err == nil && !s.emptyFinalSeen {
 			add(s.counts, "empty_final", "yes", 1)

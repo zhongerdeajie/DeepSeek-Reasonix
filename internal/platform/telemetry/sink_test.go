@@ -319,3 +319,65 @@ func TestSinkLeavesATooSmallPromptAlone(t *testing.T) {
 		t.Fatalf("a prompt too small to cache was reported as %v", got)
 	}
 }
+
+// The friction audit named these paths and could not quantify any of them
+// because nothing counted them. Every counter here is content-free: a bare
+// count, or one closed enum, so the wire never widens on its own.
+func TestSinkCountsFrictionPaths(t *testing.T) {
+	home := testenv.TempDir(t)
+	sink := (&Reporter{home: home, version: "v1.20.0"}).Wrap(&readinessSink{})
+	sink.Emit(event.Event{Kind: event.TurnStarted})
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{Tool: "bash", Subject: "rm -rf /"}})
+	sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: "q1"}})
+	sink.Emit(event.Event{Kind: event.Steer, Text: "stop"})
+	sink.Emit(event.Event{Kind: event.InboxChanged})
+	sink.Emit(event.Event{Kind: event.TurnPhase, Text: "verifying"})
+	sink.Emit(event.Event{Kind: event.TurnDone})
+
+	for signal, want := range map[string]string{
+		"approval_requested": "count",
+		"ask_requested":      "count",
+		"steer_delivered":    "count",
+		"inbox_changed":      "count",
+		"turn_phase":         "verifying",
+	} {
+		if got := pendingBuckets(t, home, signal); !slices.Equal(got, []string{want}) {
+			t.Errorf("%s buckets = %v, want [%s]", signal, got, want)
+		}
+	}
+}
+
+// An aborted fold leaves Summary empty, which is the only shape the event
+// stream carries that distinguishes it from a clean one — the difference
+// between a compaction that ran and one that silently stopped.
+func TestSinkFlagsAnAbortedCompaction(t *testing.T) {
+	home := testenv.TempDir(t)
+	sink := (&Reporter{home: home, version: "v1.20.0"}).Wrap(&readinessSink{})
+	sink.Emit(event.Event{Kind: event.TurnStarted})
+	sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: "auto"}})
+	sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: "auto"}})
+	sink.Emit(event.Event{Kind: event.TurnDone})
+
+	if got := pendingBuckets(t, home, "compaction_done"); !slices.Equal(got, []string{"auto"}) {
+		t.Fatalf("compaction_done buckets = %v, want [auto]", got)
+	}
+	if got := pendingBuckets(t, home, "compaction_aborted"); !slices.Equal(got, []string{"count"}) {
+		t.Fatalf("compaction_aborted buckets = %v, want [count]", got)
+	}
+}
+
+// A completed fold carries a summary, so the abort counter must stay silent.
+func TestSinkStaysSilentWhenCompactionCompletes(t *testing.T) {
+	home := testenv.TempDir(t)
+	sink := (&Reporter{home: home, version: "v1.20.0"}).Wrap(&readinessSink{})
+	sink.Emit(event.Event{Kind: event.TurnStarted})
+	sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: "auto", Summary: "kept the plan"}})
+	sink.Emit(event.Event{Kind: event.TurnDone})
+
+	if got := pendingBuckets(t, home, "compaction_done"); !slices.Equal(got, []string{"auto"}) {
+		t.Fatalf("compaction_done buckets = %v, want [auto]", got)
+	}
+	if got := pendingBuckets(t, home, "compaction_aborted"); len(got) != 0 {
+		t.Fatalf("a completed compaction was reported as aborted: %v", got)
+	}
+}
